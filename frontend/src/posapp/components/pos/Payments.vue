@@ -922,6 +922,165 @@ const topUpGiftCard = async () => {
 	giftCardLoading.value = false;
 };
 
+const getReceiptDefaultCustomer = () => {
+        const profileCustomer =
+                pos_profile.value?.customer ||
+                pos_profile.value?.customer_name ||
+                pos_profile.value?.default_customer ||
+                "";
+
+        return String(profileCustomer || "").trim();
+};
+
+const isDefaultWalkInCustomer = () => {
+        const doc = invoice_doc.value || {};
+        const currentCustomer = String(doc.customer || "").trim();
+        const defaultCustomer = getReceiptDefaultCustomer();
+
+        if (!currentCustomer) {
+                return false;
+        }
+
+        if (defaultCustomer && currentCustomer === defaultCustomer) {
+                return true;
+        }
+
+        const normalizedCustomer = currentCustomer.toLowerCase();
+
+        return [
+                "walk-in customer",
+                "walk in customer",
+                "walkin customer",
+                "cashsale",
+                "cash sale",
+                "cash sales",
+        ].includes(normalizedCustomer);
+};
+
+const shouldAskForReceiptCustomerDetails = () => {
+        const doc = invoice_doc.value || {};
+
+        if (!doc.customer) {
+                return false;
+        }
+
+        if (!isDefaultWalkInCustomer()) {
+                return false;
+        }
+
+        if (doc.custom_receipt_customer_name && String(doc.custom_receipt_customer_name).trim()) {
+                return false;
+        }
+
+        return true;
+};
+
+const bringReceiptDialogToFront = () => {
+	if (typeof document === "undefined") {
+		return;
+	}
+
+	setTimeout(() => {
+		const modals = document.querySelectorAll(".modal");
+		const backdrops = document.querySelectorAll(".modal-backdrop");
+
+		modals.forEach((modal) => {
+			modal.style.zIndex = "99999";
+			modal.style.position = "fixed";
+		});
+
+		backdrops.forEach((backdrop) => {
+			backdrop.style.zIndex = "99998";
+			backdrop.style.position = "fixed";
+		});
+
+		const visibleModal = document.querySelector(".modal.show");
+		if (visibleModal) {
+			const firstInput = visibleModal.querySelector("input, textarea, select");
+			if (firstInput && typeof firstInput.focus === "function") {
+				firstInput.focus();
+			}
+		}
+	}, 150);
+};
+
+const askForReceiptCustomerDetails = () => {
+	return new Promise((resolve, reject) => {
+		const doc = invoice_doc.value || {};
+		let completed = false;
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Receipt Customer Details"),
+			fields: [
+				{
+					label: __("Customer Name"),
+					fieldname: "custom_receipt_customer_name",
+					fieldtype: "Data",
+					reqd: 1,
+					default: doc.custom_receipt_customer_name || "",
+					description: __(
+						"This name will appear on the receipt only. It will not create a Customer record.",
+					),
+				},
+				{
+					label: __("Phone Number"),
+					fieldname: "custom_receipt_phone_number",
+					fieldtype: "Data",
+					reqd: 0,
+					default: doc.custom_receipt_phone_number || "",
+					description: __("Optional. This will be saved on the POS Invoice for reprints."),
+				},
+			],
+			primary_action_label: __("Continue"),
+			primary_action(values) {
+				const customerName = String(values.custom_receipt_customer_name || "").trim();
+				const phoneNumber = String(values.custom_receipt_phone_number || "").trim();
+
+				if (!customerName) {
+					toastStore.show({
+						title: __("Customer name is required before submitting this receipt."),
+						color: "error",
+					});
+					return;
+				}
+
+				const nextDoc = {
+					...invoice_doc.value,
+					custom_receipt_customer_name: customerName,
+					custom_receipt_phone_number: phoneNumber,
+				};
+
+				invoiceStore.setInvoiceDoc(nextDoc);
+
+				completed = true;
+				dialog.hide();
+
+				resolve(nextDoc);
+			},
+		});
+
+		dialog.show();
+		bringReceiptDialogToFront();
+
+		dialog.$wrapper.on("hidden.bs.modal", () => {
+			if (completed) {
+				return;
+			}
+
+			completed = true;
+			reject(new Error("RECEIPT_CUSTOMER_DIALOG_CANCELLED"));
+		});
+	});
+};
+
+const ensureReceiptCustomerDetailsBeforeSubmit = async () => {
+        if (!shouldAskForReceiptCustomerDetails()) {
+                return;
+        }
+
+        await askForReceiptCustomerDetails();
+};
+
 // Methods
 
 const get_print_formats = async () => {
@@ -1546,8 +1705,12 @@ const submitInvoiceWrapper = async (print, callbackOverrides = {}, options = {})
 
 	submissionInFlight.value = true;
 	loading.value = true;
+
 	try {
+		await ensureReceiptCustomerDetailsBeforeSubmit();
+
 		await validateSubmission(options.paymentReceived || false);
+
 		await submitInvoice(print, {
 			onPrint: (doc, printOptions = {}) => {
 				if (print) {
@@ -1588,7 +1751,7 @@ const submitInvoiceWrapper = async (print, callbackOverrides = {}, options = {})
 		console.error("Submission failed propagate:", error);
 		restorePaymentLinesAfterFailedSubmit();
 
-		if (error?.message) {
+		if (error?.message && error.message !== "RECEIPT_CUSTOMER_DIALOG_CANCELLED") {
 			toastStore.show({
 				title: error.message,
 				color: "error",
@@ -2273,5 +2436,22 @@ onBeforeUnmount(() => {
 		margin-top: 0;
 		padding-bottom: calc(env(safe-area-inset-bottom) + 4px);
 	}
+}
+
+/* Force Frappe prompt dialogs above POS Awesome Vuetify payment dialog */
+:global(.modal-backdrop) {
+        z-index: 99998 !important;
+}
+
+:global(.modal) {
+        z-index: 99999 !important;
+}
+
+:global(.modal-dialog) {
+        z-index: 100000 !important;
+}
+
+:global(.modal-content) {
+        z-index: 100001 !important;
 }
 </style>
