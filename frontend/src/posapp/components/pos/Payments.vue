@@ -86,6 +86,24 @@
 							@apply="applyGiftCardRedemption"
 							@clear="clearGiftCardRedemption"
 						/>
+
+						<div class="transaction-reference-wrapper">
+							<label class="transaction-reference-label">
+								{{ __("Transaction Reference") }}
+							</label>
+
+							<v-text-field
+								v-model="transaction_reference"
+								density="compact"
+								variant="outlined"
+								hide-details
+								clearable
+								placeholder="Bank receipt / Mpesa code"
+								class="transaction-reference-input"
+								@update:model-value="syncTransactionReferenceToInvoice"
+							/>
+						</div>
+
 					</section>
 
 					<section class="payment-section payment-section--adjustments">
@@ -406,6 +424,7 @@ const giftCardLoading = ref(false);
 const giftCardMode = ref("redeem");
 const giftCardError = ref("");
 const giftCardRedemptions = ref([]);
+const transaction_reference = ref("");
 
 // Computed Properties
 const invoice_doc = computed({
@@ -423,10 +442,10 @@ const paymentItemDiscountTotal = computed(() => {
 			explicitDiscount > 0
 				? explicitDiscount
 				: Math.max(
-						flt(item?.price_list_rate || 0, currency_precision.value) -
-							flt(item?.rate || 0, currency_precision.value),
-						0,
-					);
+					flt(item?.price_list_rate || 0, currency_precision.value) -
+					flt(item?.rate || 0, currency_precision.value),
+					0,
+				);
 
 		return sum + qty * rateDiscount;
 	}, 0);
@@ -445,7 +464,7 @@ const netInvoiceSettlementAmount = computed(() => {
 	);
 	const coveredAmount = flt(
 		(invoice_doc.value?.loyalty_amount || loyalty_amount.value || 0) +
-			(redeemed_customer_credit.value || 0),
+		(redeemed_customer_credit.value || 0),
 		currency_precision.value,
 	);
 
@@ -923,56 +942,56 @@ const topUpGiftCard = async () => {
 };
 
 const getReceiptDefaultCustomer = () => {
-        const profileCustomer =
-                pos_profile.value?.customer ||
-                pos_profile.value?.customer_name ||
-                pos_profile.value?.default_customer ||
-                "";
+	const profileCustomer =
+		pos_profile.value?.customer ||
+		pos_profile.value?.customer_name ||
+		pos_profile.value?.default_customer ||
+		"";
 
-        return String(profileCustomer || "").trim();
+	return String(profileCustomer || "").trim();
 };
 
 const isDefaultWalkInCustomer = () => {
-        const doc = invoice_doc.value || {};
-        const currentCustomer = String(doc.customer || "").trim();
-        const defaultCustomer = getReceiptDefaultCustomer();
+	const doc = invoice_doc.value || {};
+	const currentCustomer = String(doc.customer || "").trim();
+	const defaultCustomer = getReceiptDefaultCustomer();
 
-        if (!currentCustomer) {
-                return false;
-        }
+	if (!currentCustomer) {
+		return false;
+	}
 
-        if (defaultCustomer && currentCustomer === defaultCustomer) {
-                return true;
-        }
+	if (defaultCustomer && currentCustomer === defaultCustomer) {
+		return true;
+	}
 
-        const normalizedCustomer = currentCustomer.toLowerCase();
+	const normalizedCustomer = currentCustomer.toLowerCase();
 
-        return [
-                "walk-in customer",
-                "walk in customer",
-                "walkin customer",
-                "cashsale",
-                "cash sale",
-                "cash sales",
-        ].includes(normalizedCustomer);
+	return [
+		"walk-in customer",
+		"walk in customer",
+		"walkin customer",
+		"cashsale",
+		"cash sale",
+		"cash sales",
+	].includes(normalizedCustomer);
 };
 
 const shouldAskForReceiptCustomerDetails = () => {
-        const doc = invoice_doc.value || {};
+	const doc = invoice_doc.value || {};
 
-        if (!doc.customer) {
-                return false;
-        }
+	if (!doc.customer) {
+		return false;
+	}
 
-        if (!isDefaultWalkInCustomer()) {
-                return false;
-        }
+	if (!isDefaultWalkInCustomer()) {
+		return false;
+	}
 
-        if (doc.custom_receipt_customer_name && String(doc.custom_receipt_customer_name).trim()) {
-                return false;
-        }
+	if (doc.custom_receipt_customer_name && String(doc.custom_receipt_customer_name).trim()) {
+		return false;
+	}
 
-        return true;
+	return true;
 };
 
 const bringReceiptDialogToFront = () => {
@@ -1074,12 +1093,21 @@ const askForReceiptCustomerDetails = () => {
 };
 
 const ensureReceiptCustomerDetailsBeforeSubmit = async () => {
-        if (!shouldAskForReceiptCustomerDetails()) {
-                return;
-        }
+	if (!shouldAskForReceiptCustomerDetails()) {
+		return;
+	}
 
-        await askForReceiptCustomerDetails();
+	await askForReceiptCustomerDetails();
 };
+
+const syncTransactionReferenceToInvoice = () => {
+	if (!invoice_doc.value) {
+		return;
+	}
+
+	invoice_doc.value.custom_transaction_reference = String(transaction_reference.value || "").trim();
+};
+
 
 // Methods
 
@@ -1594,11 +1622,11 @@ const waitForInvoiceSubmission = async (invoiceName, doctype) => {
 };
 
 const runDeferredPrintWorkflow = async ({
-	name,
-	doctype,
-	waitForPostSubmitPayments = false,
-	waitForInvoiceProcessing = false,
-}) => {
+											name,
+											doctype,
+											waitForPostSubmitPayments = false,
+											waitForInvoiceProcessing = false,
+										}) => {
 	if (!name) return;
 
 	let resolvedDoctype = resolveSubmittedDoctype(doctype);
@@ -1632,12 +1660,12 @@ const runDeferredPrintWorkflow = async ({
 };
 
 const scheduleBackgroundStatusCheck = ({
-	name,
-	doctype,
-	print = false,
-	waitForPostSubmitPayments = false,
-	waitForInvoiceProcessing = false,
-} = {}) => {
+										   name,
+										   doctype,
+										   print = false,
+										   waitForPostSubmitPayments = false,
+										   waitForInvoiceProcessing = false,
+									   } = {}) => {
 	clearBackgroundStatusCheck();
 
 	if (!name) {
@@ -1708,6 +1736,7 @@ const submitInvoiceWrapper = async (print, callbackOverrides = {}, options = {})
 
 	try {
 		await ensureReceiptCustomerDetailsBeforeSubmit();
+		syncTransactionReferenceToInvoice();
 
 		await validateSubmission(options.paymentReceived || false);
 
@@ -2080,6 +2109,7 @@ onMounted(() => {
 	if (eventBus) {
 		eventBus.on("send_invoice_doc_payment", (doc) => {
 			invoiceStore.setInvoiceDoc(doc);
+			transaction_reference.value = doc?.custom_transaction_reference || "";
 			void refreshPaymentCustomerInfo(doc);
 			paid_change.value = flt(doc.paid_change || 0, currency_precision.value);
 			credit_change.value = flt(doc.credit_change || 0, currency_precision.value);
@@ -2437,7 +2467,42 @@ onBeforeUnmount(() => {
 		padding-bottom: calc(env(safe-area-inset-bottom) + 4px);
 	}
 }
+.transaction-reference-wrapper {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding-top: 10px;
+	margin-top: 4px;
+	border-top: 1px solid var(--pos-border-light);
+}
 
+.transaction-reference-label {
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: var(--pos-text-primary);
+	line-height: 1.2;
+}
+
+:deep(.transaction-reference-input .v-field) {
+	background: var(--pos-surface) !important;
+	border-radius: var(--pos-radius-sm);
+}
+
+:deep(.transaction-reference-input .v-field__input) {
+	min-height: 38px;
+	padding-top: 6px;
+	padding-bottom: 6px;
+	font-size: 0.88rem;
+}
+
+:deep(.transaction-reference-input input::placeholder) {
+	font-size: 0.84rem;
+	opacity: 0.65;
+}
+
+:deep(.transaction-reference-input .v-field__clearable) {
+	align-items: center;
+}
 /* Force Frappe prompt dialogs above POS Awesome Vuetify payment dialog */
 :global(.modal-backdrop) {
         z-index: 99998 !important;
