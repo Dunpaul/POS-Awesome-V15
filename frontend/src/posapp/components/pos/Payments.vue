@@ -2005,13 +2005,32 @@ watch(is_credit_return, (newVal) => {
 
 watch(
 	() => invoice_doc.value.customer,
-	(customer, previous) => {
+	async (customer, previous) => {
 		if (customer && customer !== previous) {
 			get_addresses();
 			set_print_format();
+
+			// Auto-populate KRA PIN from Customer record
+			if (!isDefaultWalkInCustomer()) {
+				try {
+					const pin = await frappe.db.get_value("Customer", customer, "tax_id");
+					const fetchedPin = pin?.message?.tax_id || "";
+					receipt_kra_pin.value = fetchedPin;
+					syncReceiptCustomerToInvoice();
+				} catch (e) {
+					receipt_kra_pin.value = "";
+				}
+			} else {
+				// Walk-in customer — clear the PIN field
+				receipt_kra_pin.value = "";
+				syncReceiptCustomerToInvoice();
+			}
+
 		} else if (!customer) {
 			addresses.value = [];
 			set_print_format();
+			receipt_kra_pin.value = "";
+			syncReceiptCustomerToInvoice();
 		}
 	},
 );
@@ -2080,14 +2099,27 @@ onMounted(() => {
 	eventBus.on("server-online", () => syncStore.syncPendingInvoices());
 
 	if (eventBus) {
-		eventBus.on("send_invoice_doc_payment", (doc) => {
+		eventBus.on("send_invoice_doc_payment", async (doc) => {
 			invoiceStore.setInvoiceDoc(doc);
 			transaction_reference.value = doc?.custom_transaction_reference || "";
 
-			// ── NEW: pre-populate inline receipt fields from the arriving doc ──
+			// Pre-populate inline receipt fields from the arriving doc
 			receipt_customer_name.value = doc?.custom_receipt_customer_name || "";
 			receipt_phone_number.value = doc?.custom_receipt_phone_number || "";
-			receipt_kra_pin.value = doc?.tax_id || "";
+
+			// KRA PIN: use saved value first, then fall back to Customer record
+			if (doc?.tax_id) {
+				receipt_kra_pin.value = doc.tax_id;
+			} else if (doc?.customer) {
+				try {
+					const pin = await frappe.db.get_value("Customer", doc.customer, "tax_id");
+					receipt_kra_pin.value = pin?.message?.tax_id || "";
+				} catch (e) {
+					receipt_kra_pin.value = "";
+				}
+			} else {
+				receipt_kra_pin.value = "";
+			}
 
 			void refreshPaymentCustomerInfo(doc);
 			paid_change.value = flt(doc.paid_change || 0, currency_precision.value);
