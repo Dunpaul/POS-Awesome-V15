@@ -30,7 +30,7 @@
 						</strong>
 						<div class="summary-hero__meta">
 							<span
-								>{{ formatFloat(total_qty, hide_qty_decimals ? 0 : undefined) }}
+							>{{ formatFloat(total_qty, hide_qty_decimals ? 0 : undefined) }}
 								{{ __("qty") }}</span
 							>
 							<span>
@@ -188,6 +188,7 @@ import { storeToRefs } from "pinia";
 import { loadItemSelectorSettings } from "../../../utils/itemSelectorSettings";
 import { useResponsive } from "../../../composables/core/useResponsive";
 import { useUIStore } from "../../../stores/uiStore";
+import { useInvoiceStore } from "../../../stores/invoiceStore";
 import {
 	getAvailableDocumentSources,
 	getDefaultDocumentSource,
@@ -250,7 +251,11 @@ const desktopDraftsDrawer = ref(false);
 const mobileDraftsDialog = ref(false);
 const responsive = useResponsive();
 const uiStore = useUIStore();
+const invoiceStore = useInvoiceStore();
 const { parkedOrders, draftSource } = storeToRefs(uiStore);
+const { invoiceDoc } = storeToRefs(invoiceStore);
+
+const __ = window.__ || ((t) => t);
 
 const additionalDiscountDisplay = ref(normalizeAdditionalDiscountDisplay(props.additional_discount));
 const additionalDiscountPercentageDisplay = ref(
@@ -400,6 +405,48 @@ function isFullReturnDiscount(value) {
 	return Math.abs(ratio - 1) < 0.0001;
 }
 
+// ─── Stock validation ─────────────────────────────────────────────────────────
+// Checks all cart items against their available stock.
+// Returns the list of items that exceed what is on hand.
+// Exempt: non-stock items, offer/free items, items where negative stock is allowed.
+function getOverStockItems() {
+	const items = invoiceDoc.value?.items || [];
+	return items.filter((item) => {
+		if (!item.is_stock_item) return false;
+		if (item.posa_is_offer || item.is_free_item) return false;
+		if (item.allow_negative_stock) return false;
+		if (props.pos_profile?.posa_allow_negative_stock) return false;
+		const available = Number(item.actual_qty);
+		const availableQty = Number.isFinite(available) ? available : 0;
+		return item.qty > availableQty;
+	});
+}
+
+function validateStock() {
+	const overStockItems = getOverStockItems();
+	if (overStockItems.length === 0) return true;
+
+	const lines = overStockItems
+		.map(
+			(i) =>
+				`<li><strong>${i.item_name}</strong>: ` +
+				`${__("requested")} <strong>${i.qty}</strong>, ` +
+				`${__("available")} <strong>${Math.max(0, Number(i.actual_qty) || 0)}</strong></li>`,
+		)
+		.join("");
+
+	frappe.msgprint({
+		title: __("Insufficient Stock"),
+		indicator: "red",
+		message:
+			__("Cannot proceed to payment. The following items exceed available stock:") +
+			`<ul style="margin-top:8px;padding-left:18px;">${lines}</ul>`,
+	});
+
+	return false;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function handleSaveAndClear() {
 	saveLoading.value = true;
 	try {
@@ -483,7 +530,12 @@ async function handlePrintDraft() {
 	}
 }
 
+// The Pay button always passes through here — desktop and mobile dock alike.
+// Stock is validated before the payment event is emitted; if validation fails
+// the dialog/panel never opens and paymentLoading resets cleanly.
 async function handleShowPayment() {
+	if (!validateStock()) return;
+
 	paymentLoading.value = true;
 	try {
 		await emit("show-payment");

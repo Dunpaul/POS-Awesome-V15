@@ -46,6 +46,15 @@
 						</template>
 						<span>{{ item.pricing_rule_badge.tooltip }}</span>
 					</v-tooltip>
+					<v-chip
+						v-if="isOverStock"
+						color="error"
+						size="x-small"
+						variant="flat"
+						class="ml-1"
+					>
+						{{ __("Over Stock") }}
+					</v-chip>
 					<v-btn
 						v-if="posProfile.posa_allow_line_item_name_override && !item.posa_is_replace"
 						icon
@@ -90,6 +99,7 @@
 						:class="{
 							'negative-number': isNegative(item.qty),
 							'large-number': qtyLength > 6,
+							'over-stock-qty': isOverStock,
 						}"
 						:data-length="qtyLength"
 						:title="formatFloat(item.qty, hideQtyDecimals ? 0 : undefined)"
@@ -224,9 +234,9 @@
 								formatFloat(
 									Math.abs(
 										item.discount_percentage ||
-											(item.price_list_rate
-												? (item.discount_amount / item.price_list_rate) * 100
-												: 0),
+										(item.price_list_rate
+											? (item.discount_amount / item.price_list_rate) * 100
+											: 0),
 									),
 								)
 							}}%
@@ -268,8 +278,8 @@
 					>
 						<span class="currency-symbol">{{ currencySymbol(displayCurrency) }}</span>
 						<span class="amount-value">{{
-							formatCurrency(Math.abs(item.discount_amount || 0))
-						}}</span>
+								formatCurrency(Math.abs(item.discount_amount || 0))
+							}}</span>
 					</div>
 					<v-text-field
 						v-else
@@ -455,9 +465,35 @@ const discountPercentInput = ref(null);
 const discountAmountInput = ref(null);
 const uomSelect = ref(null);
 
+// ─── Stock helpers ────────────────────────────────────────────────────────────
+// Returns true if this item should be subject to stock enforcement.
+// Free/offer items, non-stock items and items where the profile explicitly
+// allows negative stock are all exempt.
+const stockEnforced = computed(() => {
+	if (!props.item.is_stock_item) return false;
+	if (props.item.posa_is_offer || props.item.is_free_item) return false;
+	if (props.item.allow_negative_stock) return false;
+	if (props.posProfile?.posa_allow_negative_stock) return false;
+	return true;
+});
+
+// The available qty at the selected warehouse. Falls back to 0 when absent so
+// the guard is conservative rather than permissive.
+const availableQty = computed(() => {
+	const qty = Number(props.item.actual_qty);
+	return Number.isFinite(qty) ? qty : 0;
+});
+
+// True when the current cart qty already exceeds available stock.
+const isOverStock = computed(
+	() => stockEnforced.value && props.item.qty > availableQty.value,
+);
+// ─────────────────────────────────────────────────────────────────────────────
+
 const memoDeps = computed(() => {
 	return [
 		props.item.qty,
+		props.item.actual_qty,
 		props.item.rate,
 		props.item.amount,
 		props.item.discount_amount,
@@ -496,6 +532,8 @@ const disableIncrement = computed(
 	() =>
 		!!props.item.posa_is_replace ||
 		props.item.disable_increment ||
+		// Block the + button once the cart qty has reached available stock
+		(stockEnforced.value && props.item.qty >= availableQty.value) ||
 		(props.isReturnInvoice &&
 			(props.item.is_free_item || props.item.posa_is_offer || props.item.posa_is_replace)),
 );
@@ -541,8 +579,29 @@ function closeQtyEdit() {
 	if (isEditingQty.value) {
 		if (editingQtyValue.value !== "" && editingQtyValue.value != null) {
 			const newQty = parseFloat(editingQtyValue.value);
-			// Emit event to update parent state
 			const val = !newQty || newQty <= 0 ? 1 : newQty;
+
+			// Stock guard: cap the entered qty at what is actually available
+			if (stockEnforced.value && val > availableQty.value) {
+				const cap = availableQty.value > 0 ? availableQty.value : 0;
+				frappe.show_alert(
+					{
+						message: __(
+							`Only ${cap} unit(s) of "${props.item.item_name}" are available in stock. Quantity has been adjusted.`,
+						),
+						indicator: "red",
+					},
+					6,
+				);
+				// Only emit if there is actually something to sell; otherwise leave as-is
+				if (cap > 0) {
+					emit("update-qty", props.item, cap);
+				}
+				isEditingQty.value = false;
+				editingQtyValue.value = "";
+				return;
+			}
+
 			emit("update-qty", props.item, val);
 		}
 		isEditingQty.value = false;
@@ -577,7 +636,6 @@ function handleUomSelect(newUom) {
 	if (newUom && newUom !== props.item.uom) {
 		emit("calc-uom", props.item, newUom);
 	}
-	// Find the correct component instance to blur - ref is local now
 	uomSelect.value?.blur();
 }
 
@@ -595,9 +653,6 @@ function closeRateEdit() {
 		if (editingRateValue.value !== "" && editingRateValue.value != null) {
 			const newRate = parseFloat(editingRateValue.value);
 			if (Number.isFinite(newRate) && newRate !== props.item.rate) {
-				// We need to pass the "event-like" object that useDiscounts expects or handle it in parent
-				// For isolation, let's emit value and let parent handler construct event if needed
-				// But ItemsTable methods expect (item, value, event)
 				emit("update-rate", props.item, newRate);
 			}
 		}
@@ -695,6 +750,12 @@ function closeDiscountAmountEdit() {
 	font-weight: 600;
 }
 
+/* Highlight qty display in red when the cart qty exceeds available stock */
+.over-stock-qty {
+	color: var(--pos-error, #ef4444) !important;
+	font-weight: 700;
+}
+
 /* Add minimal padding for table cells as per ItemsTable.vue styles */
 td {
 	padding: 16px 12px;
@@ -705,7 +766,6 @@ td {
 	position: relative;
 }
 
-/* Keyboard focus styles */
 /* Keyboard focus styles */
 .posa-cart-table__qty-display:focus-visible,
 .posa-cart-table__editor-display:focus-visible {

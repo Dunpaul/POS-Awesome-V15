@@ -419,7 +419,49 @@ export default {
 			}
 			uiStore.setActiveView("payment");
 		};
+
+		// ─── Stock validation helper ──────────────────────────────────────────────
+		// Returns an array of items whose cart qty exceeds their available stock.
+		// Items that are exempt (non-stock, free/offer, negative-stock allowed) are
+		// filtered out so the check is only applied where it matters.
+		const getOverStockItems = () => {
+			const items = invoiceDoc.value?.items || [];
+			return items.filter((item) => {
+				if (!item.is_stock_item) return false;
+				if (item.posa_is_offer || item.is_free_item) return false;
+				if (item.allow_negative_stock) return false;
+				if (posProfile.value?.posa_allow_negative_stock) return false;
+				const available = Number(item.actual_qty);
+				const availableQty = Number.isFinite(available) ? available : 0;
+				return item.qty > availableQty;
+			});
+		};
+		// ─────────────────────────────────────────────────────────────────────────
+
 		const triggerInvoicePay = () => {
+			// Stock validation: block payment when any item exceeds available stock
+			const overStockItems = getOverStockItems();
+			if (overStockItems.length > 0) {
+				const lines = overStockItems
+					.map(
+						(i) =>
+							`<li><strong>${i.item_name}</strong>: ` +
+							`${__("requested")} <strong>${i.qty}</strong>, ` +
+							`${__("available")} <strong>${Math.max(0, Number(i.actual_qty) || 0)}</strong></li>`,
+					)
+					.join("");
+
+				frappe.msgprint({
+					title: __("Insufficient Stock"),
+					indicator: "red",
+					message:
+						__("Cannot proceed to payment. The following items exceed available stock:") +
+						`<ul style="margin-top:8px;">${lines}</ul>`,
+				});
+				return; // hard stop — payment never opens
+			}
+
+			// Existing payment routing — unchanged
 			if (typeof invoicePanel.value?.handleShowPaymentRequest === "function") {
 				invoicePanel.value.handleShowPaymentRequest();
 				return;
@@ -430,6 +472,7 @@ export default {
 			}
 			showPaymentPanel();
 		};
+
 		const isSelectorViewActive = (view) => compactPanel.value === "selector" && activeView.value === view;
 		const getFallbackBottomSpace = () => {
 			const rawValue = responsive.responsiveStyles.value["--bottom-safe-space"];
@@ -630,7 +673,6 @@ export default {
 		Payments,
 		Drafts,
 		InvoiceManagement,
-
 		Returns,
 		PosOffers,
 		PosCoupons,
