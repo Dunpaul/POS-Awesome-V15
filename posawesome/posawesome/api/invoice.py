@@ -23,6 +23,7 @@ def validate(doc, method):
     auto_set_delivery_charges(doc)
     calc_delivery_charges(doc)
     apply_tax_inclusive(doc)
+    validate_payment_transaction_references(doc)
 
 
 def before_submit(doc, method):
@@ -347,6 +348,49 @@ def apply_tax_inclusive(doc):
             has_changes = True
     if has_changes:
         doc.calculate_taxes_and_totals()
+
+
+def validate_payment_transaction_references(doc):
+    """Validate the (optional) itemized transaction references attached per payment method.
+
+    A payment method with no reference rows is left completely untouched, so invoices
+    created before this feature existed (or that simply don't use it) validate exactly
+    as before.
+    """
+    references = doc.get("posa_payment_transaction_references") or []
+    if not references:
+        return
+
+    references_by_mode = {}
+    for row in references:
+        if flt(row.amount) <= 0:
+            frappe.throw(_("Transaction reference amount must be greater than zero."))
+        if not (row.transaction_reference or "").strip():
+            frappe.throw(_("Transaction reference cannot be blank."))
+        references_by_mode.setdefault(row.mode_of_payment, []).append(row)
+
+    # Defense in depth: the frontend derives each payment row's amount from the sum of
+    # its own references, but don't trust the client alone.
+    for payment in doc.get("payments") or []:
+        rows = references_by_mode.get(payment.mode_of_payment)
+        if not rows:
+            continue
+        rows_total = flt(sum(flt(row.amount) for row in rows))
+        if abs(flt(payment.amount) - rows_total) > 0.005:
+            frappe.throw(
+                _("Referenced amount ({0}) does not match payment amount ({1}) for {2}.").format(
+                    rows_total, payment.amount, payment.mode_of_payment
+                )
+            )
+
+    if doc.is_return:
+        # Return invoices intentionally carry negative payment amounts.
+        return
+
+    total_payments = flt(sum(flt(payment.amount) for payment in doc.get("payments") or []))
+    invoice_total = flt(doc.rounded_total or doc.grand_total)
+    if total_payments > invoice_total + 0.005:
+        frappe.throw(_("Referenced amount exceeds invoice total."))
 
 
 def validate_shift(doc):

@@ -722,6 +722,7 @@ export function get_payments(context: any) {
 					account: payment.account,
 					type: payment.type,
 					base_amount: payment_amount, // Will be fixed in get_invoice_doc if needed
+					references: [],
 				};
 			});
 		}
@@ -750,6 +751,7 @@ export function get_payments(context: any) {
 						? 1
 						: 0,
 				base_amount: 0,
+				references: [],
 			}));
 	}
 
@@ -774,8 +776,14 @@ export function get_payments(context: any) {
 						? 1
 						: 0,
 				base_amount: 0,
+				references: [],
 			}));
 	}
 
+	context.invoice_doc.payments.forEach((payment) => {
+		if (!Array.isArray(payment.references)) {
+			payment.references = [];
+		}
+	});
 	return context.invoice_doc.payments;
 }

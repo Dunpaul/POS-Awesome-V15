@@ -33,7 +33,7 @@
 						:rules="[isNumber]"
 						:prefix="currencySymbol(currency)"
 						@focus="$emit('set-rest-amount', payment, isReturn)"
-						:readonly="isGiftCardPayment(payment)"
+						:readonly="isGiftCardPayment(payment) || hasReferences(payment)"
 					></v-text-field>
 				</v-col>
 				<v-col cols="12" md="5" v-if="!isMpesaC2bPayment(payment)">
@@ -103,12 +103,31 @@
 						{{ __("Request Payment") }}
 					</v-btn>
 				</v-col>
+
+				<v-col
+					cols="12"
+					v-if="isReferenceEligible(payment)"
+					class="pa-0"
+				>
+					<PaymentReferences
+						:payment="payment"
+						:currency="currency"
+						:currency-symbol="currencySymbol"
+						:remaining="remaining"
+						:format-currency="formatCurrency"
+						@add-reference="$emit('add-reference', payment)"
+						@update-reference="(index, field, value) => $emit('update-reference', payment, index, field, value)"
+						@remove-reference="(index) => $emit('remove-reference', payment, index)"
+					/>
+				</v-col>
 			</v-row>
 		</div>
 	</div>
 </template>
 
 <script setup>
+import PaymentReferences from "./PaymentReferences.vue";
+
 const frappe = window.frappe;
 const __ = window.__;
 
@@ -127,6 +146,10 @@ const props = defineProps({
 		type: Function,
 		default: () => false,
 	},
+	remaining: {
+		type: Number,
+		default: 0,
+	},
 });
 
 const emit = defineEmits([
@@ -137,6 +160,9 @@ const emit = defineEmits([
 	"request-payment",
 	"set-rest-amount",
 	"open-gift-card",
+	"add-reference",
+	"update-reference",
+	"remove-reference",
 ]);
 
 const handlePrimaryAction = (payment) => {
@@ -146,6 +172,16 @@ const handlePrimaryAction = (payment) => {
 	}
 	emit("set-full-amount", payment, props.isReturn);
 };
+
+const hasReferences = (payment) =>
+	Array.isArray(payment?.references) && payment.references.length > 0;
+
+// Multi-reference tracking is offered for non-cash methods that don't already have
+// their own dedicated collection UI (gift card redemption, M-Pesa C2B).
+const isReferenceEligible = (payment) =>
+	payment?.type !== "Cash" &&
+	!props.isMpesaC2bPayment(payment) &&
+	!props.isGiftCardPayment(payment);
 </script>
 
 <style scoped>

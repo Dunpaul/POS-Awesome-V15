@@ -137,7 +137,8 @@ export function usePaymentMethods(options: PaymentMethodsOptions) {
 			// Find other payments with amount > 0 to reduce
 			// We filter out the current payment being edited to avoid circular issues
 			const otherPayments = doc.payments.filter(
-				(p: any) => p !== excludePayment && flt(p.amount) > 0,
+				(p: any) =>
+					p !== excludePayment && flt(p.amount) > 0 && !hasReferences(p),
 			);
 
 			// Sort by amount descending to reduce larger chunks first
@@ -237,13 +238,71 @@ export function usePaymentMethods(options: PaymentMethodsOptions) {
 		}
 	};
 
+	// Once a payment row has itemized transaction references, those references are the
+	// source of truth for its amount — auto-fill helpers become no-ops for that row so
+	// they can never silently overwrite what the cashier just typed.
+	const hasReferences = (payment: any) =>
+		Array.isArray(payment?.references) && payment.references.length > 0;
+
+	// Sum a payment row's transaction references into its amount/base_amount.
+	const syncPaymentAmountFromReferences = (payment: any) => {
+		if (!payment || payment.type === "Cash") return;
+		if (!hasReferences(payment)) return;
+
+		const doc = unref(invoiceDoc);
+		const total = payment.references.reduce(
+			(sum: number, row: any) => sum + flt(row.amount),
+			0,
+		);
+		payment.amount = flt(total);
+		if (payment.base_amount !== undefined) {
+			const conversion_rate = doc?.conversion_rate || 1;
+			payment.base_amount = flt(total * conversion_rate);
+		}
+	};
+
+	const addPaymentReference = (payment: any, defaultAmount: number = 0) => {
+		if (!payment) return;
+		if (!Array.isArray(payment.references)) payment.references = [];
+		payment.references.push({
+			mode_of_payment: payment.mode_of_payment,
+			transaction_reference: "",
+			amount: flt(defaultAmount),
+			posting_datetime: frappe.datetime?.now_datetime
+				? frappe.datetime.now_datetime()
+				: new Date().toISOString(),
+		});
+		syncPaymentAmountFromReferences(payment);
+	};
+
+	const updatePaymentReference = (
+		payment: any,
+		index: number,
+		field: string,
+		value: any,
+	) => {
+		if (!payment || !Array.isArray(payment.references)) return;
+		const row = payment.references[index];
+		if (!row) return;
+		row[field] = field === "amount" ? flt(value) : value;
+		syncPaymentAmountFromReferences(payment);
+	};
+
+	const removePaymentReference = (payment: any, index: number) => {
+		if (!payment || !Array.isArray(payment.references)) return;
+		payment.references.splice(index, 1);
+		syncPaymentAmountFromReferences(payment);
+	};
+
 	// Set full amount for a payment mode
 	const set_full_amount = (payment: any, isReturn = false) => {
+		if (hasReferences(payment)) return;
+
 		const doc = unref(invoiceDoc);
 		const invoiceAmount = getInvoiceSettlementAmount();
-		// Reset other payments
+		// Reset other payments (skip rows whose amount is derived from references)
 		doc.payments.forEach((p: any) => {
-			if (p.mode_of_payment !== payment.mode_of_payment) {
+			if (p.mode_of_payment !== payment.mode_of_payment && !hasReferences(p)) {
 				p.amount = 0;
 				if (p.base_amount !== undefined) p.base_amount = 0;
 			}
@@ -258,6 +317,8 @@ export function usePaymentMethods(options: PaymentMethodsOptions) {
 	};
 
 	const set_rest_amount = (payment: any, isReturn = false) => {
+		if (hasReferences(payment)) return;
+
 		const doc = unref(invoiceDoc);
 		const invoiceAmount = getInvoiceSettlementAmount();
 		const currentPaid = doc.payments.reduce(
@@ -422,5 +483,10 @@ export function usePaymentMethods(options: PaymentMethodsOptions) {
 		getVisibleDenominations,
 		isCashLikePayment,
 		reset_cash_payments,
+		hasReferences,
+		syncPaymentAmountFromReferences,
+		addPaymentReference,
+		updatePaymentReference,
+		removePaymentReference,
 	};
 }

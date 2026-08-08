@@ -29,6 +29,10 @@ export interface PaymentSubmissionOptions {
 	customerCreditDict?: Ref<any[]>;
 	giftCardRedemptions?: Ref<any[]>;
 	diff_payment?: ComputedRef<number>;
+	// Overrides the default `max(-diff_payment, 0)` change-due cap. Pass this when cash
+	// payment amounts are capped at what's owed (so diff_payment can no longer go
+	// negative) and the tendered-vs-applied excess is tracked separately.
+	changeLimit?: ComputedRef<number> | Ref<number>;
 	is_credit_sale?: Ref<boolean>;
 	loyaltyAmount?: Ref<number>;
 	stores?: {
@@ -433,6 +437,14 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 					)
 				: false);
 
+		// 1b. Referenced/recorded payments can never exceed the invoice total. Cash rows are
+		// already capped as they're entered (their excess lives in cash-tendered/change-due,
+		// not in payment.amount), so this mainly catches non-cash reference amounts that
+		// collectively overshoot once summed across methods.
+		if (!doc.is_return && effective_total_payments > invoice_total + 0.005) {
+			throw new Error(__("Referenced amount exceeds invoice total."));
+		}
+
 		// 2. Validate total payments
 		if (
 			writeOffCappedByLimit &&
@@ -516,7 +528,9 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 		}
 
 		// 5. Validate paid_change
-		const changeLimit = Math.max(-diff, 0);
+		const changeLimit = options.changeLimit
+			? unref(options.changeLimit)
+			: Math.max(-diff, 0);
 		const pChange = unref(paidChange) || 0;
 		if (pChange > changeLimit + 0.001) {
 			throw new Error(
@@ -589,6 +603,13 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 	const buildSubmissionInvoiceDoc = (doc: any) => {
 		const submissionDoc = JSON.parse(JSON.stringify(doc || {}));
 		ensureInvoiceClientRequestId(submissionDoc);
+		// `references` is client-only scratch state (see submitInvoice), already flattened
+		// into `posa_payment_transaction_references` — the child doctype the backend expects.
+		if (Array.isArray(submissionDoc.payments)) {
+			submissionDoc.payments.forEach((payment: any) => {
+				delete payment.references;
+			});
+		}
 		return submissionDoc;
 	};
 
@@ -706,7 +727,11 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 
 		const diff = unref(diff_payment) || 0;
 		const writeOffAmount = getEffectiveWriteOffAmount(doc, profile, diff);
-		const changeLimit = !doc.is_return ? Math.max(-diff, 0) : 0;
+		const changeLimit = !doc.is_return
+			? options.changeLimit
+				? unref(options.changeLimit)
+				: Math.max(-diff, 0)
+			: 0;
 		let pChange = !doc.is_return
 			? formatFloat(Math.min(unref(paidChange) || 0, changeLimit), prec)
 			: 0;
@@ -762,6 +787,24 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 			);
 			doc.paid_change = pChange;
 			doc.credit_change = cChange;
+
+			// Flatten each payment row's client-only `references` list into the invoice-level
+			// child table the backend actually persists (grouped by mode_of_payment, since
+			// references are matched to their payment row by that field, not a stable row id).
+			if (Array.isArray(doc.payments)) {
+				const flattenedReferences: any[] = [];
+				doc.payments.forEach((payment: any) => {
+					if (!Array.isArray(payment.references)) return;
+					payment.references.forEach((row: any) => {
+						flattenedReferences.push({
+							mode_of_payment: payment.mode_of_payment,
+							transaction_reference: row.transaction_reference,
+							amount: row.amount,
+						});
+					});
+				});
+				doc.posa_payment_transaction_references = flattenedReferences;
+			}
 		}
 
 		if (!doc.is_return) {
@@ -800,7 +843,7 @@ export function usePaymentSubmission(options: PaymentSubmissionOptions) {
 				);
 			}
 			try {
-				await saveOfflineInvoice({ data, invoice: doc });
+				await saveOfflineInvoice({ data, invoice: buildSubmissionInvoiceDoc(doc) });
 				stores?.syncStore?.updatePendingCount();
 				stores?.toastStore?.show({
 					title: __("Invoice saved offline"),

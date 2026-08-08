@@ -47,6 +47,39 @@ function computePaidAmount(doc: any) {
 	return paymentsTotal || base;
 }
 
+function paymentBreakdownRows(invoice: any) {
+	const references = Array.isArray(invoice?.posa_payment_transaction_references)
+		? invoice.posa_payment_transaction_references
+		: [];
+
+	// Only shown once a sale actually uses itemized transaction references; invoices
+	// that don't use the feature print exactly as before (just the lump "Paid" row).
+	if (!references.length) return "";
+
+	const payments = Array.isArray(invoice?.payments) ? invoice.payments : [];
+
+	return payments
+		.filter((p: any) => Math.abs(parseFloat(p.amount) || 0) > 0)
+		.map((p: any) => {
+			const modeRefs = references.filter(
+				(r: any) => r.mode_of_payment === p.mode_of_payment,
+			);
+			const refLines = modeRefs
+				.map(
+					(r: any) => `<tr>
+                <td style="width:60%; padding-left:10px; font-size:10px;">${r.transaction_reference}</td>
+                <td style="width:40%; text-align:right; font-size:10px;">${r.amount}</td>
+            </tr>`,
+				)
+				.join("");
+			return `<tr>
+                <td style="width:60%">${p.mode_of_payment}</td>
+                <td style="width:40%; text-align:right;">${p.amount}</td>
+            </tr>${refLines}`;
+		})
+		.join("");
+}
+
 function defaultOfflineHTML(invoice: any, terms = "") {
 	if (!invoice) return "";
 
@@ -158,6 +191,7 @@ function defaultOfflineHTML(invoice: any, terms = "") {
                 <td style="width:60%">Paid</td>
                 <td style="width:40%; text-align:right;">${paidAmount}</td>
             </tr>
+            ${paymentBreakdownRows(invoice)}
             ${changeRow}
         </tbody>
     </table>

@@ -253,6 +253,18 @@
 								:items-per-page="-1"
 								hide-default-footer
 							>
+								<template #item.customer_name="{ item }">
+									<div>{{ item.customer_name || item.customer || "" }}</div>
+									<div
+										v-if="
+											item.custom_receipt_customer_name &&
+											item.custom_receipt_customer_name !== item.customer_name
+										"
+										class="text-caption text-medium-emphasis"
+									>
+										{{ item.custom_receipt_customer_name }}
+									</div>
+								</template>
 								<template #item.posting_date="{ item }">{{
 									formatDateTime(item.posting_date, item.posting_time)
 								}}</template>
@@ -289,6 +301,16 @@
 											{{ repairStateLabel(changeAllocationRepairState(item)) }}
 										</v-chip>
 									</div>
+								</template>
+								<template #item.custom_cu_status="{ item }">
+									<v-chip
+										v-if="item.custom_cu_status"
+										size="small"
+										:color="fiscalStatusColor(item.custom_cu_status)"
+										variant="tonal"
+										>{{ __(item.custom_cu_status) }}</v-chip
+									>
+									<span v-else class="text-caption text-medium-emphasis">{{ "-" }}</span>
 								</template>
 								<template #item.actions="{ item }">
 									<div class="d-flex justify-end ga-1">
@@ -365,6 +387,15 @@
 													__("Walk-in Customer")
 												}}
 											</div>
+											<div
+												v-if="
+													invoice.custom_receipt_customer_name &&
+													invoice.custom_receipt_customer_name !== invoice.customer_name
+												"
+												class="text-caption text-medium-emphasis"
+											>
+												{{ __("Receipt Name") }}: {{ invoice.custom_receipt_customer_name }}
+											</div>
 										</div>
 										<div class="invoice-record-card__amount-block">
 											<div class="invoice-record-card__amount-label">
@@ -421,6 +452,12 @@
 												<div class="meta-pair__label">{{ __("Payment State") }}</div>
 												<div class="meta-pair__value">
 													{{ __(invoice.status || "Draft") }}
+												</div>
+											</div>
+											<div class="meta-pair">
+												<div class="meta-pair__label">{{ __("Fiscal Status") }}</div>
+												<div class="meta-pair__value">
+													{{ invoice.custom_cu_status ? __(invoice.custom_cu_status) : "-" }}
 												</div>
 											</div>
 										</div>
@@ -620,6 +657,18 @@
 								:items-per-page="-1"
 								hide-default-footer
 							>
+								<template #item.customer_name="{ item }">
+									<div>{{ item.customer_name || item.customer || "" }}</div>
+									<div
+										v-if="
+											item.custom_receipt_customer_name &&
+											item.custom_receipt_customer_name !== item.customer_name
+										"
+										class="text-caption text-medium-emphasis"
+									>
+										{{ item.custom_receipt_customer_name }}
+									</div>
+								</template>
 								<template #item.posting_date="{ item }">{{
 									formatDateTime(item.posting_date, item.posting_time)
 								}}</template>
@@ -643,6 +692,16 @@
 										__(item.status || "Unpaid")
 									}}</v-chip></template
 								>
+								<template #item.custom_cu_status="{ item }">
+									<v-chip
+										v-if="item.custom_cu_status"
+										size="small"
+										:color="fiscalStatusColor(item.custom_cu_status)"
+										variant="tonal"
+										>{{ __(item.custom_cu_status) }}</v-chip
+									>
+									<span v-else class="text-caption text-medium-emphasis">{{ "-" }}</span>
+								</template>
 								<template #item.actions="{ item }">
 									<div class="d-flex justify-end ga-1">
 										<v-btn
@@ -707,10 +766,27 @@
 													__("Walk-in Customer")
 												}}
 											</div>
+											<div
+												v-if="
+													invoice.custom_receipt_customer_name &&
+													invoice.custom_receipt_customer_name !== invoice.customer_name
+												"
+												class="text-caption text-medium-emphasis"
+											>
+												{{ __("Receipt Name") }}: {{ invoice.custom_receipt_customer_name }}
+											</div>
 										</div>
 										<div class="d-flex flex-column align-end ga-2">
 											<v-chip size="small" :color="dueTone(invoice)" variant="tonal">
 												{{ dueLabel(invoice) }}
+											</v-chip>
+											<v-chip
+												v-if="invoice.custom_cu_status"
+												size="small"
+												:color="fiscalStatusColor(invoice.custom_cu_status)"
+												variant="tonal"
+											>
+												{{ __(invoice.custom_cu_status) }}
 											</v-chip>
 											<div class="invoice-record-card__amount-block">
 												<div class="invoice-record-card__amount-label">
@@ -1237,6 +1313,16 @@
 					<div class="text-subtitle-2 text-medium-emphasis">
 						{{ selectedInvoiceDetail?.customer_name || selectedInvoiceDetail?.customer || "" }}
 					</div>
+					<div
+						v-if="
+							selectedInvoiceDetail?.custom_receipt_customer_name &&
+							selectedInvoiceDetail.custom_receipt_customer_name !==
+								selectedInvoiceDetail?.customer_name
+						"
+						class="text-caption text-medium-emphasis"
+					>
+						{{ __("Receipt Name") }}: {{ selectedInvoiceDetail.custom_receipt_customer_name }}
+					</div>
 				</div>
 				<div class="d-flex align-center ga-2">
 					<v-chip
@@ -1245,6 +1331,13 @@
 						:color="statusColor(selectedInvoiceDetail.status)"
 						variant="tonal"
 						>{{ __(selectedInvoiceDetail.status) }}</v-chip
+					>
+					<v-chip
+						v-if="selectedInvoiceDetail?.custom_cu_status"
+						size="small"
+						:color="fiscalStatusColor(selectedInvoiceDetail.custom_cu_status)"
+						variant="tonal"
+						>{{ __(selectedInvoiceDetail.custom_cu_status) }}</v-chip
 					>
 					<v-chip
 						v-if="selectedInvoiceDetail && changeAllocationRepairState(selectedInvoiceDetail)"
@@ -1337,6 +1430,26 @@
 				>
 					{{ __("No payment rows available on this invoice.") }}
 				</div>
+				<template
+					v-if="
+						Array.isArray(selectedInvoiceDetail.posa_payment_transaction_references) &&
+						selectedInvoiceDetail.posa_payment_transaction_references.length
+					"
+				>
+					<div class="detail-section__title mt-4">{{ __("Transaction References") }}</div>
+					<v-data-table
+						:headers="referenceHeaders"
+						:items="selectedInvoiceDetail.posa_payment_transaction_references"
+						item-value="name"
+						:items-per-page="5"
+						class="elevation-1"
+					>
+						<template #item.amount="{ item }"
+							>{{ currencySymbol(selectedInvoiceDetail.currency) }}
+							{{ formatCurrency(item.amount || 0) }}</template
+						>
+					</v-data-table>
+				</template>
 			</v-card-text>
 			<v-card-actions>
 				<v-spacer />
@@ -1507,6 +1620,7 @@ export default {
 			{ title: __("Posting"), key: "posting_date" },
 			{ title: __("Due Date"), key: "due_date" },
 			{ title: __("Status"), key: "status" },
+			{ title: __("Fiscal Status"), key: "custom_cu_status" },
 			{ title: __("Total"), key: "grand_total", align: "end" },
 			{ title: __("Paid"), key: "paid_amount", align: "end" },
 			{ title: __("Outstanding"), key: "outstanding_amount", align: "end" },
@@ -1517,6 +1631,7 @@ export default {
 			{ title: __("Customer"), key: "customer_name" },
 			{ title: __("Posting"), key: "posting_date" },
 			{ title: __("Status"), key: "status" },
+			{ title: __("Fiscal Status"), key: "custom_cu_status" },
 			{ title: __("Total"), key: "grand_total", align: "end" },
 			{ title: __("Tendered"), key: "paid_amount", align: "end" },
 			{ title: __("Change Return"), key: "change_amount", align: "end" },
@@ -1542,6 +1657,12 @@ export default {
 			{ title: __("Mode"), key: "mode_of_payment" },
 			{ title: __("Amount"), key: "amount", align: "end" },
 			{ title: __("Account"), key: "account" },
+		],
+		referenceHeaders: [
+			{ title: __("Mode"), key: "mode_of_payment" },
+			{ title: __("Transaction Reference"), key: "transaction_reference" },
+			{ title: __("Amount"), key: "amount", align: "end" },
+			{ title: __("Posted"), key: "posting_datetime" },
 		],
 	}),
 	computed: {
@@ -2048,8 +2169,8 @@ export default {
 			filters.pos_profile = this.posProfile?.name;
 			return filters;
 		},
-		getInvoiceListFields(extraFields = []) {
-			return [
+		getInvoiceListFields(extraFields = [], doctype = this.currentInvoiceDoctype) {
+			const fields = [
 				"name",
 				"customer",
 				"customer_name",
@@ -2063,8 +2184,15 @@ export default {
 				"pos_profile",
 				"owner",
 				"modified_by",
+				// Present on both Sales Invoice and POS Invoice.
+				"custom_cu_status",
 				...extraFields,
 			];
+			// Receipt customer name override only exists as a custom field on POS Invoice.
+			if (doctype === "POS Invoice") {
+				fields.push("custom_receipt_customer_name");
+			}
+			return fields;
 		},
 		sortInvoicesByLatest(items) {
 			return [...items].sort(
@@ -2109,6 +2237,14 @@ export default {
 			if (value.includes("overdue")) return "error";
 			if (value.includes("credit")) return "info";
 			return "primary";
+		},
+		fiscalStatusColor(status) {
+			const value = String(status || "").toLowerCase();
+			if (value === "fiscalized") return "success";
+			if (value === "pending" || value === "retry required") return "warning";
+			if (value === "error") return "error";
+			if (value === "cancelled") return "default";
+			return "default";
 		},
 		isOverdue(invoice) {
 			const status = String(invoice?.status || "").toLowerCase();
@@ -2414,11 +2550,10 @@ export default {
 							args: {
 								doctype,
 								filters,
-								fields: this.getInvoiceListFields([
-									"change_amount",
-									"is_return",
-									"return_against",
-								]),
+								fields: this.getInvoiceListFields(
+									["change_amount", "is_return", "return_against"],
+									doctype,
+								),
 								order_by: "posting_date desc, posting_time desc, modified desc",
 								limit_page_length: 0,
 							},

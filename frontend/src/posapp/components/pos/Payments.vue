@@ -60,13 +60,17 @@
 								:isCashLikePayment="isCashLikePayment"
 								:isMpesaC2bPayment="is_mpesa_c2b_payment"
 								:isGiftCardPayment="isGiftCardPayment"
+								:remaining="diff_payment"
 								@update-amount="handlePaymentAmountChange"
-								@set-full-amount="set_full_amount"
+								@set-full-amount="handleSetFullAmount"
 								@set-denomination="setPaymentToDenomination"
 								@mpesa-dialog="mpesa_c2b_dialog"
 								@request-payment="request_payment"
-								@set-rest-amount="set_rest_amount"
+								@set-rest-amount="handleSetRestAmount"
 								@open-gift-card="openGiftCardDialog"
+								@add-reference="handleAddPaymentReference"
+								@update-reference="handleUpdatePaymentReference"
+								@remove-reference="handleRemovePaymentReference"
 							/>
 							<PaymentGiftCardSection
 								v-if="is_cashback && invoice_doc"
@@ -89,23 +93,10 @@
 							/>
 						</div>
 
-						<!-- Customer details + transaction ref in a compact 2×2 grid -->
+						<!-- Customer details grid; per-payment transaction references now live under each payment method -->
 						<div class="pane pane--customer">
 							<div class="pane__label">{{ __("Customer & Reference") }}</div>
 							<div class="customer-grid">
-								<div class="cfield">
-									<label class="cfield__label">{{ __("Transaction Ref") }}</label>
-									<v-text-field
-										v-model="transaction_reference"
-										density="compact"
-										variant="outlined"
-										hide-details
-										clearable
-										placeholder="Bank receipt / Mpesa code"
-										class="cfield__input"
-										@update:model-value="syncTransactionReferenceToInvoice"
-									/>
-								</div>
 								<div class="cfield">
 									<label class="cfield__label">{{ __("Customer Name") }}</label>
 									<v-text-field
@@ -484,6 +475,11 @@ const print_format = ref("");
 const print_formats = ref([]);
 const paid_change_rules = ref([]);
 const is_user_editing_paid_change = ref(false);
+// Amount actually handed over by the customer per cash-like payment row (keyed by
+// mode_of_payment), kept separate from `payment.amount` — which is capped at what's
+// owed — so cash change-due keeps working without the recorded payment ever exceeding
+// the invoice total.
+const cash_tendered = ref({});
 const highlightSubmit = ref(false);
 const last_payment_change_was_cash = ref(null);
 const backgroundStatusCheck = ref(null);
@@ -505,7 +501,6 @@ const giftCardLoading = ref(false);
 const giftCardMode = ref("redeem");
 const giftCardError = ref("");
 const giftCardRedemptions = ref([]);
-const transaction_reference = ref("");
 
 // ── NEW: Inline receipt customer detail refs ──
 const receipt_customer_name = ref("");
@@ -664,6 +659,25 @@ const paymentCalculations = usePaymentCalculations({
 const { diff_payment, total_payments, total_payments_display, diff_payment_display, diff_label, change_due } =
 	paymentCalculations;
 
+// Excess handed over on cash-like rows (tendered minus what was actually recorded/applied
+// to the invoice) — the decoupled replacement for reading change-due off a negative
+// diff_payment, since cash payment amounts are now capped and can no longer go negative.
+const pending_cash_change = computed(() => {
+	const doc = invoice_doc.value;
+	if (!doc || !Array.isArray(doc.payments)) return 0;
+
+	return doc.payments.reduce((sum, payment) => {
+		if (!isCashLikePayment(payment)) return sum;
+		const tendered = cash_tendered.value[payment.mode_of_payment] || 0;
+		const applied = flt(payment.amount, currency_precision.value);
+		return sum + Math.max(flt(tendered, currency_precision.value) - applied, 0);
+	}, 0);
+});
+
+const effective_change_limit = computed(() =>
+	flt(Math.max(-diff_payment.value, 0) + pending_cash_change.value, currency_precision.value),
+);
+
 const {
 	phone_dialog,
 	get_mpesa_modes,
@@ -675,6 +689,9 @@ const {
 	request_payment,
 	getVisibleDenominations,
 	isCashLikePayment,
+	addPaymentReference,
+	updatePaymentReference,
+	removePaymentReference,
 } = usePaymentMethods({
 	invoiceDoc: computed(() => invoiceStore.invoiceDoc),
 	posProfile: pos_profile,
@@ -718,7 +735,7 @@ const {
 	customerCreditDict: customer_credit_dict,
 	redeemedCustomerCredit: redeemed_customer_credit,
 	isCashback: is_cashback,
-	getTotalChange: () => Math.max(-diff_payment.value, 0),
+	getTotalChange: () => effective_change_limit.value,
 	getPaidChange: () => paid_change.value,
 	getCreditChange: () => credit_change.value,
 	onBackToInvoice: () => eventBus.emit("change_active_view", "Invoice"),
@@ -774,6 +791,7 @@ const { ensureReturnPaymentsAreNegative, restoreReturnPayments, validateSubmissi
 		customerCreditDict: customer_credit_dict,
 		giftCardRedemptions: giftCardRedemptions,
 		diff_payment: diff_payment,
+		changeLimit: effective_change_limit,
 		is_credit_sale: is_credit_sale,
 		loyaltyAmount: loyalty_amount,
 		formatFloat: (val, prec) => flt(val, prec),
@@ -1060,14 +1078,6 @@ const isDefaultWalkInCustomer = () => {
 		"cash sale",
 		"cash sales",
 	].includes(normalizedCustomer);
-};
-
-const syncTransactionReferenceToInvoice = () => {
-	if (!invoice_doc.value) {
-		return;
-	}
-
-	invoice_doc.value.custom_transaction_reference = String(transaction_reference.value || "").trim();
 };
 
 // ── NEW: Sync inline receipt customer fields to the invoice doc ──
@@ -1437,7 +1447,7 @@ const handleRedemptionFormattedCurrency = (data) => {
 };
 
 const updateCreditChange = (rawValue) => {
-	const changeLimit = Math.max(-diff_payment.value, 0);
+	const changeLimit = effective_change_limit.value;
 	let requestedCredit = flt(Math.abs(rawValue) || 0, currency_precision.value);
 
 	if (requestedCredit > changeLimit) {
@@ -1455,8 +1465,49 @@ const updateCreditChange = (rawValue) => {
 	}
 };
 
+// Cash rows never record more than what's owed — the excess a customer hands over stays
+// separate (in cash_tendered) and drives change-due via pending_cash_change instead of
+// inflating payment.amount past the invoice total.
+const applyCashTender = (payment, tenderedAmount) => {
+	const doc = invoice_doc.value;
+	cash_tendered.value = { ...cash_tendered.value, [payment.mode_of_payment]: tenderedAmount };
+
+	const invoiceTotal = flt(doc.rounded_total || doc.grand_total, currency_precision.value);
+	const otherPaymentsTotal = doc.payments.reduce(
+		(sum, p) => (p === payment ? sum : sum + flt(p.amount, currency_precision.value)),
+		0,
+	);
+	const remainingBeforeThis = Math.max(
+		flt(invoiceTotal - otherPaymentsTotal, currency_precision.value),
+		0,
+	);
+	const appliedAmount = flt(Math.min(tenderedAmount, remainingBeforeThis), currency_precision.value);
+
+	payment.amount = appliedAmount;
+	if (payment.base_amount !== undefined) {
+		const conversion_rate = doc.conversion_rate || 1;
+		payment.base_amount = flt(appliedAmount * conversion_rate, currency_precision.value);
+	}
+};
+
+const clearCashTender = (payment) => {
+	if (!isCashLikePayment(payment)) return;
+	if (!(payment.mode_of_payment in cash_tendered.value)) return;
+	const next = { ...cash_tendered.value };
+	delete next[payment.mode_of_payment];
+	cash_tendered.value = next;
+};
+
 const handlePaymentAmountChange = (payment, event) => {
 	last_payment_change_was_cash.value = isCashLikePayment(payment);
+
+	if (isCashLikePayment(payment) && !invoice_doc.value?.is_return) {
+		const holder = {};
+		setFormatedCurrency(holder, "value", null, true, event);
+		applyCashTender(payment, holder.value);
+		return;
+	}
+
 	setFormatedCurrency(payment, "amount", null, false, event);
 
 	// For return invoices: user enters a positive number but we store it as negative (refund)
@@ -1470,12 +1521,40 @@ const handlePaymentAmountChange = (payment, event) => {
 };
 
 const setPaymentToDenomination = (payment, amount) => {
+	last_payment_change_was_cash.value = isCashLikePayment(payment);
+
+	if (isCashLikePayment(payment) && !invoice_doc.value?.is_return) {
+		applyCashTender(payment, amount);
+		return;
+	}
+
 	payment.amount = amount;
 	if (payment.base_amount !== undefined) {
 		const conversion_rate = invoice_doc.value.conversion_rate || 1;
 		payment.base_amount = flt(amount * conversion_rate, currency_precision.value);
 	}
-	last_payment_change_was_cash.value = isCashLikePayment(payment);
+};
+
+const handleSetFullAmount = (payment, isReturnFlag) => {
+	clearCashTender(payment);
+	set_full_amount(payment, isReturnFlag);
+};
+
+const handleSetRestAmount = (payment, isReturnFlag) => {
+	clearCashTender(payment);
+	set_rest_amount(payment, isReturnFlag);
+};
+
+const handleAddPaymentReference = (payment) => {
+	addPaymentReference(payment, Math.max(diff_payment.value, 0));
+};
+
+const handleUpdatePaymentReference = (payment, index, field, value) => {
+	updatePaymentReference(payment, index, field, value);
+};
+
+const handleRemovePaymentReference = (payment, index) => {
+	removePaymentReference(payment, index);
 };
 
 // UI Feedback Methods
@@ -1708,7 +1787,6 @@ const submitInvoiceWrapper = async (print, callbackOverrides = {}, options = {})
 
 	try {
 		// Sync all inline fields to the invoice doc before submission
-		syncTransactionReferenceToInvoice();
 		syncReceiptCustomerToInvoice();
 
 		await validateSubmission(options.paymentReceived || false);
@@ -1857,18 +1935,17 @@ watch(
 	{ immediate: true },
 );
 
-watch(diff_payment, (newVal) => {
+watch(effective_change_limit, (newLimit) => {
 	if (is_user_editing_paid_change.value) return;
 
 	const lastEditWasCash = last_payment_change_was_cash.value;
 
-	if (newVal < 0) {
-		const changeDue = -newVal;
+	if (newLimit > 0) {
 		if (lastEditWasCash === false) {
-			paid_change.value = flt(changeDue, currency_precision.value);
+			paid_change.value = flt(newLimit, currency_precision.value);
 			credit_change.value = 0;
 		} else {
-			paid_change.value = changeDue;
+			paid_change.value = newLimit;
 		}
 	} else {
 		updateCreditChange(0);
@@ -1878,7 +1955,7 @@ watch(diff_payment, (newVal) => {
 });
 
 watch(paid_change, (newVal) => {
-	const changeLimit = Math.max(-diff_payment.value, 0);
+	const changeLimit = effective_change_limit.value;
 	if (newVal > changeLimit) {
 		paid_change.value = changeLimit;
 		credit_change.value = 0;
@@ -2101,7 +2178,6 @@ onMounted(() => {
 	if (eventBus) {
 		eventBus.on("send_invoice_doc_payment", async (doc) => {
 			invoiceStore.setInvoiceDoc(doc);
-			transaction_reference.value = doc?.custom_transaction_reference || "";
 
 			// Pre-populate inline receipt fields from the arriving doc
 			receipt_customer_name.value = doc?.custom_receipt_customer_name || "";
