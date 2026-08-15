@@ -543,13 +543,11 @@ export default {
 					to: "/gift-cards",
 				});
 			}
-			if (this.currentCashier?.is_supervisor) {
-				items.splice(1, 0, {
-					text: "Awesome Dashboard",
-					icon: "mdi-view-dashboard-outline",
-					to: "/dashboard",
-				});
-			}
+			items.splice(1, 0, {
+				text: "Awesome Dashboard",
+				icon: "mdi-view-dashboard-outline",
+				to: "/dashboard",
+			});
 			if (this.posProfile?.posa_enable_cash_movement) {
 				items.push({
 					text: "Cash Movement",

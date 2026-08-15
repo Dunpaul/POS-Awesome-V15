@@ -302,7 +302,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useUIStore } from "@/posapp/stores/uiStore";
-import { useEmployeeStore } from "@/posapp/stores/employeeStore";
 import { createReportFormatters } from "@/posapp/composables/useReportFormatters";
 import {
 	createEmptyDashboard,
@@ -377,7 +376,6 @@ defineOptions({
 });
 
 const uiStore = useUIStore();
-const employeeStore = useEmployeeStore();
 
 const loading = ref(false);
 const errorMessage = ref("");
@@ -433,7 +431,7 @@ const availableProfiles = computed(() => dashboardData.value.available_profiles 
 const enabledProfiles = computed(() =>
 	availableProfiles.value.filter((profile) => profile.dashboard_enabled !== false),
 );
-const isPosSupervisor = computed(() => Boolean(employeeStore.currentCashier?.is_supervisor));
+const isPosSupervisor = computed(() => true);
 
 const dashboardScopeItems = computed(() => {
 	const items = [

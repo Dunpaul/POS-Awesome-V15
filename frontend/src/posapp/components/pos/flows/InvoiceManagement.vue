@@ -2799,6 +2799,7 @@ export default {
 	display: flex;
 	flex-direction: column;
 	max-height: min(94vh, 1040px);
+	overflow: hidden;
 }
 
 .invoice-management-card--dark {
@@ -2857,8 +2858,8 @@ export default {
 }
 
 .invoice-management-card__body {
-	min-height: 580px;
 	flex: 1;
+	min-height: 0;
 	overflow: auto;
 }
 
