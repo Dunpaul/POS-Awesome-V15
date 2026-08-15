@@ -2303,12 +2303,28 @@ onBeforeUnmount(() => {
 	padding: 12px;
 }
 
+.payment-shell--dialog {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
 .payment-card--dialog {
 	margin-top: 0;
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .payment-scroll {
 	padding: 4px;
+}
+
+.payment-shell--dialog .payment-scroll {
+	flex: 1;
+	min-height: 0;
 }
 
 /* ═══════════════════════════════════════════
