@@ -363,6 +363,8 @@ export interface DashboardResponse {
 		today?: string;
 		month_start?: string;
 		report_month?: string;
+		item_sales_period?: string;
+		item_sales_date?: string;
 	};
 	sales_overview: DashboardMetricPayload;
 	daily_sales_summary?: SalesSummaryPayload;
@@ -570,6 +572,7 @@ export interface DashboardResponse {
 			from?: string;
 			to?: string;
 		};
+		scope?: "day" | "month";
 		items?: ItemSalesRow[];
 		highlights?: {
 			best_seller?: {
@@ -704,6 +707,8 @@ export interface DashboardRequest {
 	scope?: "all" | "current" | "specific";
 	profile_filter?: string | null;
 	report_month?: string | null;
+	item_sales_period?: "day" | "month" | null;
+	item_sales_date?: string | null;
 	low_stock_threshold?: number;
 	fast_moving_limit?: number;
 	fast_moving_page?: number;

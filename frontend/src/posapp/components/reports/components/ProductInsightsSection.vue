@@ -8,6 +8,27 @@
 							{{ __("Item / Product Sales Report") }}
 						</h2>
 						<div class="dashboard-chip-row">
+							<v-btn-toggle
+								:model-value="itemSalesScope"
+								density="compact"
+								mandatory
+								color="primary"
+								variant="outlined"
+								@update:model-value="(value) => emit('update:itemSalesScope', value)"
+							>
+								<v-btn size="small" value="day">{{ __("Day") }}</v-btn>
+								<v-btn size="small" value="month">{{ __("Month") }}</v-btn>
+							</v-btn-toggle>
+							<v-text-field
+								v-if="itemSalesScope === 'day'"
+								:model-value="itemSalesDate"
+								type="date"
+								density="compact"
+								variant="outlined"
+								hide-details
+								style="max-width: 160px"
+								@update:model-value="(value) => emit('update:itemSalesDate', value)"
+							/>
 							<v-chip size="small" color="info" variant="tonal">
 								{{ itemSalesRangeLabel }}
 							</v-chip>
@@ -187,6 +208,8 @@ import TrendPanel from "./TrendPanel.vue";
 type DashboardRow = Record<string, any>;
 
 defineProps<{
+	itemSalesScope: "day" | "month";
+	itemSalesDate: string;
 	itemSalesRangeLabel: string;
 	itemSalesBestSellerLabel: string;
 	itemSalesTopMarginLabel: string;
@@ -209,6 +232,11 @@ defineProps<{
 	formatQuantity: (value: number) => string;
 	formatPercent: (value?: number | null, digits?: number) => string;
 	trendProgress: (value: number, maxValue: number) => number;
+}>();
+
+const emit = defineEmits<{
+	(e: "update:itemSalesScope", value: "day" | "month"): void;
+	(e: "update:itemSalesDate", value: string): void;
 }>();
 
 const __ = (value: string) => (window.__ ? window.__(value) : value);

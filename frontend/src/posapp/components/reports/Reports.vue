@@ -181,6 +181,8 @@
 
 				<ProductInsightsSection
 					v-show="activeDashboardTab === 'products'"
+					v-model:item-sales-scope="itemSalesScope"
+					v-model:item-sales-date="itemSalesDate"
 					:item-sales-range-label="itemSalesRangeLabel"
 					:item-sales-best-seller-label="itemSalesBestSellerLabel"
 					:item-sales-top-margin-label="itemSalesTopMarginLabel"
@@ -387,7 +389,10 @@ const dashboardScope = ref<"all" | "current" | "specific">("all");
 const selectedProfileFilter = ref("");
 const initialNow = new Date();
 const currentMonthToken = `${initialNow.getFullYear()}-${String(initialNow.getMonth() + 1).padStart(2, "0")}`;
+const currentDateToken = `${initialNow.getFullYear()}-${String(initialNow.getMonth() + 1).padStart(2, "0")}-${String(initialNow.getDate()).padStart(2, "0")}`;
 const selectedReportMonth = ref(currentMonthToken);
+const itemSalesScope = ref<"day" | "month">("day");
+const itemSalesDate = ref(currentDateToken);
 const scopeInitialized = ref(false);
 const fastMovingPage = ref(1);
 const fastMovingPageSize = ref(10);
@@ -1441,6 +1446,8 @@ async function loadDashboard() {
 			profile_filter:
 				dashboardScope.value === "specific" ? selectedProfileFilter.value || undefined : undefined,
 			report_month: selectedReportMonth.value || undefined,
+			item_sales_period: itemSalesScope.value,
+			item_sales_date: itemSalesScope.value === "day" ? itemSalesDate.value || undefined : undefined,
 			low_stock_threshold: configuredLowStockThreshold.value,
 			item_sales_limit: itemSalesLimit.value,
 			category_report_limit: categoryReportLimit.value,
@@ -1530,6 +1537,16 @@ watch(
 			return;
 		}
 		if (newValue === oldValue) {
+			return;
+		}
+		void loadDashboard();
+	},
+);
+
+watch(
+	[() => itemSalesScope.value, () => itemSalesDate.value],
+	([newScope, newDate], [oldScope, oldDate]) => {
+		if (newScope === oldScope && newDate === oldDate) {
 			return;
 		}
 		void loadDashboard();

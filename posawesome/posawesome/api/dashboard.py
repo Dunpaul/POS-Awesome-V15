@@ -4572,6 +4572,8 @@ def get_dashboard_data(
     scope=None,
     profile_filter=None,
     report_month=None,
+    item_sales_period=None,
+    item_sales_date=None,
     low_stock_threshold=None,
     fast_moving_limit: int = 10,
     fast_moving_page: int = 1,
@@ -4707,6 +4709,15 @@ def get_dashboard_data(
     current_today = getdate(nowdate())
     month_start, report_to_date, selected_report_month = _resolve_report_month(report_month, current_today)
     fast_moving_days = max(1, (report_to_date - month_start).days + 1)
+
+    selected_item_sales_scope = "month" if cstr(item_sales_period).strip().lower() == "month" else "day"
+    if selected_item_sales_scope == "day":
+        item_sales_day = getdate(item_sales_date) if cstr(item_sales_date).strip() else current_today
+        if item_sales_day > current_today:
+            item_sales_day = current_today
+        item_sales_date_from, item_sales_date_to = str(item_sales_day), str(item_sales_day)
+    else:
+        item_sales_date_from, item_sales_date_to = str(month_start), str(report_to_date)
     global_enabled = True
     # Keep dashboard operational whenever scoped profiles are available.
     # Global flag is kept in payload for backward compatibility.
@@ -4744,6 +4755,8 @@ def get_dashboard_data(
             "today": str(report_to_date),
             "month_start": str(month_start),
             "report_month": selected_report_month,
+            "item_sales_period": selected_item_sales_scope,
+            "item_sales_date": item_sales_date_from,
         },
         "sales_overview": {
             "today_sales": 0.0,
@@ -5155,10 +5168,11 @@ def get_dashboard_data(
     payload["item_sales_report"] = _collect_item_sales_report(
         profile_names=selected_profile_names,
         company=company,
-        date_from=str(month_start),
-        date_to=str(report_to_date),
+        date_from=item_sales_date_from,
+        date_to=item_sales_date_to,
         limit=item_sales_limit,
     )
+    payload["item_sales_report"]["scope"] = selected_item_sales_scope
     payload["category_brand_variant_report"] = _collect_category_brand_variant_report(
         profile_names=selected_profile_names,
         company=company,

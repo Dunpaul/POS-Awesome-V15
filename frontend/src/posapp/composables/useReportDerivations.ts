@@ -24,6 +24,9 @@ export function reportRangeLabel(
 	if (!from || !to) {
 		return translate("Current Month");
 	}
+	if (from === to) {
+		return formatDate(from);
+	}
 	return `${formatDate(from)} - ${formatDate(to)}`;
 }
 
