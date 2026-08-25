@@ -1473,6 +1473,16 @@
 					>{{ __("Add Payment") }}</v-btn
 				>
 				<v-btn
+					v-if="selectedInvoiceDetail && canRetryFiscalization(selectedInvoiceDetail)"
+					color="info"
+					variant="text"
+					prepend-icon="mdi-receipt-text-check-outline"
+					:loading="fiscalizeLoading"
+					:disabled="fiscalizeLoading || isOffline()"
+					@click="retryFiscalization(selectedInvoiceDetail)"
+					>{{ __("Retry Fiscalization") }}</v-btn
+				>
+				<v-btn
 					v-if="selectedInvoiceDetail"
 					color="primary"
 					variant="text"
@@ -1610,6 +1620,7 @@ export default {
 			delivery: [],
 		},
 		repairChangeLoading: false,
+		fiscalizeLoading: false,
 		detailDialog: false,
 		selectedInvoiceDetail: null,
 		partialStatusItems: ["All", "Partly Paid", "Unpaid", "Overdue"],
@@ -2376,6 +2387,58 @@ export default {
 				this.toastStore.show({ title: __("Unable to repair change allocation"), color: "error" });
 			} finally {
 				this.repairChangeLoading = false;
+			}
+		},
+		canRetryFiscalization(invoice) {
+			if (!invoice || Number(invoice.docstatus) !== 1) return false;
+			if (!Object.prototype.hasOwnProperty.call(invoice, "custom_cu_status")) return false;
+			if (invoice.custom_cu_invoice_number) return false;
+			const status = String(invoice.custom_cu_status || "").toLowerCase();
+			return status !== "fiscalized";
+		},
+		async retryFiscalization(invoice) {
+			if (!invoice || !this.canRetryFiscalization(invoice)) {
+				this.toastStore.show({ title: __("This invoice does not need fiscalization retry"), color: "info" });
+				return;
+			}
+			if (isOffline()) {
+				this.toastStore.show({
+					title: __("Fiscalization retry requires an online connection"),
+					color: "warning",
+				});
+				return;
+			}
+
+			this.fiscalizeLoading = true;
+			try {
+				const response = await frappe.call({
+					method: "tremol_intergration.api.fiscalize_invoice",
+					args: {
+						doctype: invoice.doctype || this.currentInvoiceDoctype || "Sales Invoice",
+						name: invoice.name,
+					},
+					freeze: true,
+					freeze_message: __("Retrying fiscalization..."),
+				});
+				const result = response?.message || {};
+				if (result.ok) {
+					this.toastStore.show({
+						title: __("Invoice fiscalized successfully"),
+						color: "success",
+					});
+				} else {
+					this.toastStore.show({
+						title: result.message || result.cu_error_message || __("Fiscalization failed"),
+						color: "error",
+					});
+				}
+				await this.viewInvoice(invoice);
+				await this.refreshAll();
+			} catch (error) {
+				console.error("Error retrying fiscalization:", error);
+				this.toastStore.show({ title: __("Unable to retry fiscalization"), color: "error" });
+			} finally {
+				this.fiscalizeLoading = false;
 			}
 		},
 		draftItemCount(invoice) {
